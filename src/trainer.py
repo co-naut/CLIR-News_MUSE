@@ -51,86 +51,7 @@ class Trainer(object):
 
         self.decrease_lr = False
 
-    def get_dis_xy(self, volatile):
-        """
-        Get discriminator input batch / output target.
-        """
-        # select random word IDs
-        bs = self.params.batch_size
-        mf = self.params.dis_most_frequent
-        assert mf <= min(len(self.src_dico), len(self.tgt_dico))
-        src_ids = torch.LongTensor(bs).random_(len(self.src_dico) if mf == 0 else mf)
-        tgt_ids = torch.LongTensor(bs).random_(len(self.tgt_dico) if mf == 0 else mf)
-        if self.params.cuda:
-            src_ids = src_ids.cuda()
-            tgt_ids = tgt_ids.cuda()
-
-        # get word embeddings
-        src_emb = self.src_emb(Variable(src_ids, volatile=True))
-        tgt_emb = self.tgt_emb(Variable(tgt_ids, volatile=True))
-        src_emb = self.mapping(Variable(src_emb.data, volatile=volatile))
-        tgt_emb = Variable(tgt_emb.data, volatile=volatile)
-
-        # input / target
-        x = torch.cat([src_emb, tgt_emb], 0)
-        y = torch.FloatTensor(2 * bs).zero_()
-        y[:bs] = 1 - self.params.dis_smooth
-        y[bs:] = self.params.dis_smooth
-        y = Variable(y.cuda() if self.params.cuda else y)
-
-        return x, y
-
-    def dis_step(self, stats):
-        """
-        Train the discriminator.
-        """
-        self.discriminator.train()
-
-        # loss
-        x, y = self.get_dis_xy(volatile=True)
-        preds = self.discriminator(Variable(x.data))
-        loss = F.binary_cross_entropy(preds, y)
-        stats['DIS_COSTS'].append(loss.data.item())
-
-        # check NaN
-        if (loss != loss).data.any():
-            logger.error("NaN detected (discriminator)")
-            exit()
-
-        # optim
-        self.dis_optimizer.zero_grad()
-        loss.backward()
-        self.dis_optimizer.step()
-        clip_parameters(self.discriminator, self.params.dis_clip_weights)
-
-    def mapping_step(self, stats):
-        """
-        Fooling discriminator training step.
-        """
-        if self.params.dis_lambda == 0:
-            return 0
-
-        self.discriminator.eval()
-
-        # loss
-        x, y = self.get_dis_xy(volatile=False)
-        preds = self.discriminator(x)
-        loss = F.binary_cross_entropy(preds, 1 - y)
-        loss = self.params.dis_lambda * loss
-
-        # check NaN
-        if (loss != loss).data.any():
-            logger.error("NaN detected (fool discriminator)")
-            exit()
-
-        # optim
-        self.map_optimizer.zero_grad()
-        loss.backward()
-        self.map_optimizer.step()
-        self.orthogonalize()
-
-        return 2 * self.params.batch_size
-
+    # USED BY: vector_mapping.py - VectorMapper.train()
     def load_training_dico(self, dico_train):
         """
         Load training dictionary.
@@ -156,6 +77,7 @@ class Trainer(object):
         if self.params.cuda:
             self.dico = self.dico.cuda()
 
+    # USED BY: vector_mapping.py - IterativeRefinementMapper.fit()
     def build_dictionary(self):
         """
         Build a dictionary from aligned embeddings.
@@ -166,6 +88,7 @@ class Trainer(object):
         tgt_emb = tgt_emb / tgt_emb.norm(2, 1, keepdim=True).expand_as(tgt_emb)
         self.dico = build_dictionary(src_emb, tgt_emb, self.params)
 
+    # USED BY: vector_mapping.py - OrthogonalMapper.fit(), IterativeRefinementMapper.fit()
     def procrustes(self):
         """
         Find the best orthogonal matrix mapping using the Orthogonal Procrustes problem
@@ -178,40 +101,7 @@ class Trainer(object):
         U, S, V_t = scipy.linalg.svd(M, full_matrices=True)
         W.copy_(torch.from_numpy(U.dot(V_t)).type_as(W))
 
-    def orthogonalize(self):
-        """
-        Orthogonalize the mapping.
-        """
-        if self.params.map_beta > 0:
-            W = self.mapping.weight.data
-            beta = self.params.map_beta
-            W.copy_((1 + beta) * W - beta * W.mm(W.transpose(0, 1).mm(W)))
-
-    def update_lr(self, to_log, metric):
-        """
-        Update learning rate when using SGD.
-        """
-        if 'sgd' not in self.params.map_optimizer:
-            return
-        old_lr = self.map_optimizer.param_groups[0]['lr']
-        new_lr = max(self.params.min_lr, old_lr * self.params.lr_decay)
-        if new_lr < old_lr:
-            logger.info("Decreasing learning rate: %.8f -> %.8f" % (old_lr, new_lr))
-            self.map_optimizer.param_groups[0]['lr'] = new_lr
-
-        if self.params.lr_shrink < 1 and to_log[metric] >= -1e7:
-            if to_log[metric] < self.best_valid_metric:
-                logger.info("Validation metric is smaller than the best: %.5f vs %.5f"
-                            % (to_log[metric], self.best_valid_metric))
-                # decrease the learning rate, only if this is the
-                # second time the validation metric decreases
-                if self.decrease_lr:
-                    old_lr = self.map_optimizer.param_groups[0]['lr']
-                    self.map_optimizer.param_groups[0]['lr'] *= self.params.lr_shrink
-                    logger.info("Shrinking the learning rate: %.5f -> %.5f"
-                                % (old_lr, self.map_optimizer.param_groups[0]['lr']))
-                self.decrease_lr = True
-
+    # USED BY: vector_mapping.py - IterativeRefinementMapper.fit()
     def save_best(self, to_log, metric):
         """
         Save the best model for the given validation metric.
@@ -227,6 +117,7 @@ class Trainer(object):
             logger.info('* Saving the mapping to %s ...' % path)
             torch.save(W, path)
 
+    # USED BY: vector_mapping.py - IterativeRefinementMapper.fit()
     def reload_best(self):
         """
         Reload the best mapping.
@@ -240,6 +131,7 @@ class Trainer(object):
         assert to_reload.size() == W.size()
         W.copy_(to_reload.type_as(W))
 
+    # USED BY: vector_mapping.py - VectorMapper.export()
     def export(self):
         """
         Export embeddings.

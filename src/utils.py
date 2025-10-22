@@ -131,6 +131,7 @@ def get_idf(europarl, src_lg, tgt_lg, n_idf):
     return idf
 
 
+# USED BY: vector_mapping.py - IterativeRefinementMapper._csls_score(), VectorMapper.translate()
 def get_nn_avg_dist(emb, query, knn):
     """
     Compute the average distance of the `knn` nearest neighbors
@@ -280,8 +281,6 @@ def read_txt_embeddings(params, source, full_vocab):
                 assert _emb_dim_file == int(split[1])
             else:
                 word, vect = line.rstrip().split(' ', 1)
-                if not full_vocab:
-                    word = word.lower()
                 vect = np.fromstring(vect, sep=' ')
                 if np.linalg.norm(vect) == 0:  # avoid to have null embeddings
                     vect[0] = 0.01
@@ -323,7 +322,6 @@ def select_subset(word_list, max_vocab):
     word2id = {}
     indexes = []
     for i, word in enumerate(word_list):
-        word = word.lower()
         if word not in word2id:
             word2id[word] = len(word2id)
             indexes.append(i)
@@ -406,6 +404,7 @@ def load_embeddings(params, source, full_vocab=False):
         return read_txt_embeddings(params, source, full_vocab)
 
 
+# USED BY: vector_mapping.py - VectorPreprocessor.normalize(), VectorPreprocessor.center()
 def normalize_embeddings(emb, types, mean=None):
     """
     Normalize embeddings by their norms / recenter them.
@@ -424,6 +423,7 @@ def normalize_embeddings(emb, types, mean=None):
     return mean.cpu() if mean is not None else None
 
 
+# USED BY: vector_mapping.py - VectorMapper.export()
 def export_embeddings(src_emb, tgt_emb, params):
     """
     Export embeddings to a text or a PyTorch file.

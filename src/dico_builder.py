@@ -14,6 +14,7 @@ from .utils import get_nn_avg_dist
 logger = getLogger()
 
 
+# USED BY: vector_mapping.py - IterativeRefinementMapper._get_candidates()
 def get_candidates(emb1, emb2, params):
     """
     Get best translation pairs candidates.
@@ -140,6 +141,7 @@ def get_candidates(emb1, emb2, params):
     return all_pairs
 
 
+# USED BY: vector_mapping.py - IterativeRefinementMapper._build_dictionary(), Evaluator.mean_cosine_similarity()
 def build_dictionary(src_emb, tgt_emb, params, s2t_candidates=None, t2s_candidates=None):
     """
     Build a training dictionary given current embeddings / mapping.
